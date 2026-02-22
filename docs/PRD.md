@@ -264,4 +264,4 @@ flowchart TD
     E["Slack 앱에 슬래시 커맨드 URL 등록<br/>(sam deploy 출력의 SlackEventsApiUrl)"]
 ```
 
-자세한 내용은 [runbook/deployment.md](./runbook/deployment.md)를 참조하세요.
+자세한 내용은 [RUNBOOK.md](./RUNBOOK.md)를 참조하세요.

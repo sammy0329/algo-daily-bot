@@ -1,42 +1,102 @@
 # algo-daily-bot
 
-AWS Lambda 기반 서버리스 슬랙봇 | 매일 백준 문제 추천 + AI 코드 리뷰 + 블로그 초안 자동 생성
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-20.x-339933?logo=nodedotjs&logoColor=white)
+![AWS Lambda](https://img.shields.io/badge/AWS-Lambda-FF9900?logo=awslambda&logoColor=white)
+![AWS SAM](https://img.shields.io/badge/AWS-SAM-FF9900?logo=amazonaws&logoColor=white)
+![Slack](https://img.shields.io/badge/Slack-Bot-4A154B?logo=slack&logoColor=white)
+
+> AWS Lambda 기반 서버리스 슬랙봇 — 매일 백준 문제 추천 + AI 코드 리뷰 + 블로그 초안 자동 생성
+
+알고리즘 학습을 자동화하는 개인용 Slack 봇입니다. 매일 아침 solved.ac 기반으로 백준 문제를 추천하고, `/review` 커맨드로 AI 코드 리뷰를, `/blog` 커맨드로 풀이 블로그 초안을 생성합니다. GPT / Claude / Gemini 중 원하는 AI를 Lambda 재배포 없이 런타임에 전환할 수 있습니다.
+
+---
 
 ## 기능
 
-| 기능 | 설명 |
-|---|---|
-| 📅 일일 문제 추천 | 매일 09:00 KST에 solved.ac 기반 백준 문제를 Slack 채널에 자동 게시 |
-| 🔍 AI 코드 리뷰 | `/review` 슬래시 커맨드로 코드를 제출하면 AI가 한국어로 리뷰 |
-| ✍️ 블로그 초안 생성 | `/blog` 슬래시 커맨드로 알고리즘 풀이 블로그 초안 자동 생성 |
+| 기능                | 설명                                                               |
+| ------------------- | ------------------------------------------------------------------ |
+| 📅 일일 문제 추천   | 매일 09:00 KST에 solved.ac 기반 백준 문제를 Slack 채널에 자동 게시 |
+| 🔍 AI 코드 리뷰     | `/review` 슬래시 커맨드로 문제 맥락 + 정답 여부를 포함한 AI 리뷰   |
+| ✍️ 블로그 초안 생성 | `/blog` 슬래시 커맨드로 알고리즘 풀이 블로그 초안 자동 생성        |
+| 🔄 풀이 자동 동기화 | 매일 00:00 KST에 solved.ac 풀이 목록 자동 갱신                     |
+
+---
 
 ## 아키텍처
 
-```
-EventBridge (크론)
-    ↓
-DailyRecommendFunction ─────────────────────→ Slack 채널
-    ↓ (solved.ac API)
-    └── DynamoDB (추천 이력 + 풀이 캐시)
+```mermaid
+flowchart TD
+    subgraph Cron["⏰ EventBridge (크론)"]
+        E1["00:00 KST<br>매일 동기화"]
+        E2["09:00 KST<br>문제 추천"]
+    end
 
-Slack 슬래시 커맨드
-    ↓
-SlackEventsFunction (유효성 검사 → 즉시 200 반환)
-    ↓ Lambda.invoke(async)
-WorkerFunction ──→ AI API (GPT / Claude / Gemini)
-    ↓
-Slack 스레드 답글
-    ↓ (실패 시)
-SQS Dead Letter Queue
+    subgraph Slack["💬 Slack"]
+        SC["/review · /blog<br>슬래시 커맨드"]
+        SM["채널 메시지<br>스레드 답글"]
+    end
+
+    subgraph AWS["☁️ AWS"]
+        APIGW["API Gateway<br>(HTTP API)"]
+
+        subgraph Lambda["Lambda Functions"]
+            DS["DailySyncFunction<br>solved.ac 동기화"]
+            DR["DailyRecommendFunction<br>문제 추천"]
+            SE["SlackEventsFunction<br>서명 검증 · 즉시 200"]
+            WK["WorkerFunction<br>AI 처리 (비동기)"]
+        end
+
+        DDB[("DynamoDB<br>단일 테이블")]
+        SSM["SSM<br>Parameter Store"]
+        DLQ["SQS DLQ<br>실패 메시지"]
+    end
+
+    subgraph External["🌐 외부 API"]
+        SAC["solved.ac API"]
+        AI["AI API<br>GPT / Claude / Gemini"]
+    end
+
+    E1 --> DS
+    E2 --> DR
+    SC --> APIGW --> SE
+    SE -->|"Lambda.invoke (비동기)"| WK
+    SE -->|즉시 HTTP 200| Slack
+
+    DS --> SAC
+    DS --> DDB
+    DR --> SAC
+    DR --> DDB
+    DR --> SM
+
+    WK --> SAC
+    WK --> AI
+    WK --> SM
+    WK -->|실패 시| DLQ
+
+    SE --> DDB
+    WK --> SSM
+    DR --> SSM
 ```
+
+---
 
 ## 기술 스택
 
-- **런타임**: Node.js 20.x (TypeScript), ARM64 Lambda
-- **IaC**: AWS SAM
-- **데이터베이스**: DynamoDB 단일 테이블
-- **AI**: GPT / Claude / Gemini (런타임 전환 가능)
-- **문제 소스**: solved.ac 비공식 API
+| 분류             | 기술                                                        |
+| ---------------- | ----------------------------------------------------------- |
+| **런타임**       | Node.js 20.x (TypeScript), ARM64 Lambda                     |
+| **IaC**          | AWS SAM (esbuild 번들링)                                    |
+| **데이터베이스** | DynamoDB 단일 테이블 설계                                   |
+| **스케줄링**     | EventBridge Scheduler (ScheduleV2)                          |
+| **AI**           | OpenAI GPT / Anthropic Claude / Google Gemini (런타임 전환) |
+| **시크릿**       | AWS SSM Parameter Store                                     |
+| **문제 소스**    | solved.ac 비공식 API                                        |
+| **모니터링**     | CloudWatch Logs + SQS DLQ 알람                              |
+| **테스트**       | Vitest                                                      |
+
+---
 
 ## 시작하기
 
@@ -47,7 +107,7 @@ SQS Dead Letter Queue
 - Node.js 20.x
 - [Slack 앱 생성](https://api.slack.com/apps) (스코프: `chat:write`, `commands`)
 
-### 설치 및 배포
+### 설치 및 배포 (최초 1회)
 
 ```bash
 # 1. 의존성 설치
@@ -88,6 +148,8 @@ aws cloudformation create-stack \
 ```
 
 > **참고**: `sam deploy --guided`는 일부 AWS 계정에서 SAM Transform 권한 오류가 발생합니다. 위 방식은 로컬에서 변환 후 표준 CloudFormation으로 배포합니다. 자세한 내용은 [troubleshooting.md](docs/troubleshooting.md)를 참조하세요.
+>
+> **코드 변경 후 재배포**는 `create-stack` 대신 `update-stack`을 사용합니다. 전체 절차는 [RUNBOOK.md](docs/RUNBOOK.md)를 참조하세요.
 
 ### SSM 시크릿 설정
 
@@ -115,11 +177,11 @@ TABLE_NAME=AlgoDailyBotTable \
 ts-node scripts/setup-ai.ts --provider gpt --model gpt-4o-mini --api-key sk-...
 ```
 
-| 제공자 | `--provider` | 모델 예시 |
-|---|---|---|
-| OpenAI | `gpt` | `gpt-4o-mini`, `gpt-4o` |
-| Anthropic | `claude` | `claude-haiku-4-5`, `claude-sonnet-4-6` |
-| Google | `gemini` | `gemini-2.0-flash`, `gemini-1.5-pro` |
+| 제공자    | `--provider` | 모델 예시                               |
+| --------- | ------------ | --------------------------------------- |
+| OpenAI    | `gpt`        | `gpt-4o-mini`, `gpt-4o`                 |
+| Anthropic | `claude`     | `claude-haiku-4-5`, `claude-sonnet-4-6` |
+| Google    | `gemini`     | `gemini-2.0-flash`, `gemini-1.5-pro`    |
 
 AI 제공자 변경 시 `setup-ai.ts`를 다시 실행하면 됩니다. **Lambda 재배포 불필요.**
 
@@ -130,6 +192,8 @@ AI 제공자 변경 시 `setup-ai.ts`를 다시 실행하면 됩니다. **Lambda
    - `/blog` → `<SlackEventsApiUrl>`
 
 2. Bot Token Scopes 확인: `chat:write`, `commands`
+
+---
 
 ## 슬래시 커맨드 사용법
 
@@ -174,6 +238,23 @@ def fib(n): ...
 - 일일 5회 제한
 - 결과는 스레드 답글에 마크다운 형식으로 게시
 
+---
+
+## 문서
+
+| 문서 | 설명 |
+|---|---|
+| [user-guide.md](docs/user-guide.md) | 전체 설치·설정·사용법 상세 가이드 |
+| [RUNBOOK.md](docs/RUNBOOK.md) | 운영 런북 (재배포·모니터링·장애 대응) |
+| [CONTRIB.md](docs/CONTRIB.md) | 개발 환경 설정·스크립트·기여 가이드 |
+| [PRD.md](docs/PRD.md) | 제품 요구사항 정의서 |
+| [architecture/overview.md](docs/architecture/overview.md) | 시스템 아키텍처 개요 |
+| [architecture/data-flow.md](docs/architecture/data-flow.md) | 데이터 흐름 및 DynamoDB 테이블 설계 |
+| [troubleshooting.md](docs/troubleshooting.md) | 배포 오류 해결 (SAM Transform 권한 등) |
+| [adr/](docs/adr/) | 아키텍처 결정 기록 (ADR) |
+
+---
+
 ## 개발
 
 ```bash
@@ -183,10 +264,14 @@ npm run lint          # ESLint
 sam local invoke DailyRecommendFunction -e events/schedule.json  # 로컬 테스트
 ```
 
+---
+
 ## 모니터링
 
 - **WorkerDLQ 알람**: DLQ에 메시지가 쌓이면 CloudWatch 알람 발생
 - **로그**: CloudWatch Logs (`/aws/lambda/algo-daily-bot-*`)
+
+---
 
 ## 라이선스
 
