@@ -1,0 +1,40 @@
+{
+  "name": "algo-daily-bot",
+  "version": "1.0.0",
+  "description": "AWS Lambda 기반 서버리스 슬랙봇 | 매일 백준 문제 추천 + AI 코드 리뷰 + 블로그 초안 자동 생성",
+  "private": true,
+  "scripts": {
+    "build": "sam build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src scripts --ext .ts",
+    "format": "prettier --write src scripts",
+    "sync": "ts-node scripts/sync.ts",
+    "setup-ai": "ts-node scripts/setup-ai.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@aws-sdk/client-dynamodb": "^3.0.0",
+    "@aws-sdk/client-lambda": "^3.0.0",
+    "@aws-sdk/client-ssm": "^3.0.0",
+    "@aws-sdk/lib-dynamodb": "^3.0.0",
+    "@google/generative-ai": "^0.21.0",
+    "@slack/web-api": "^7.0.0",
+    "openai": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.140",
+    "@types/node": "^22.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "@vitest/coverage-v8": "^3.0.0",
+    "aws-sdk-client-mock": "^4.0.0",
+    "esbuild": "^0.27.3",
+    "eslint": "^9.0.0",
+    "prettier": "^3.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.0.0",
+    "vitest": "^3.0.0"
+  }
+}

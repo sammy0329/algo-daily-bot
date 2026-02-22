@@ -1,0 +1,22 @@
+version = 0.1
+
+[default.global.parameters]
+stack_name = "algo-daily-bot"
+region = "ap-northeast-2"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
+disable_rollback = false
+
+[default.build.parameters]
+parallel = true
+
+[default.deploy.parameters]
+confirm_changeset = true
+s3_prefix = "algo-daily-bot"
+# s3_bucket은 첫 배포 시 sam deploy --guided 로 설정됩니다
+resolve_s3 = true
+parameter_overrides = "SlackChannelId=\"D0AG7CT96Q3\" ReviewDailyLimit=\"10\" BlogDailyLimit=\"5\""
+image_repositories = []
+
+[default.local_invoke.parameters]
+env_vars = "env.json"
