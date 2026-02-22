@@ -1,0 +1,252 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2021-10-31
+Description: algo-daily-bot - AWS Lambda 기반 서버리스 슬랙봇
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Architectures:
+      - arm64
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref AlgoDailyBotTable
+        SLACK_CHANNEL_ID: !Ref SlackChannelId
+        REVIEW_DAILY_LIMIT: !Ref ReviewDailyLimit
+        BLOG_DAILY_LIMIT: !Ref BlogDailyLimit
+
+Parameters:
+  SlackChannelId:
+    Type: String
+    Description: 일일 문제 추천 대상 Slack 채널 ID
+
+  ReviewDailyLimit:
+    Type: Number
+    Default: 10
+    Description: 사용자별 일일 /review 최대 횟수
+
+  BlogDailyLimit:
+    Type: Number
+    Default: 5
+    Description: 사용자별 일일 /blog 최대 횟수
+
+Resources:
+
+  # ──────────────────────────────────────────
+  # SQS Dead Letter Queue
+  # ──────────────────────────────────────────
+  WorkerDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: algo-daily-bot-worker-dlq
+      MessageRetentionPeriod: 1209600  # 14일
+
+  # ──────────────────────────────────────────
+  # DynamoDB 단일 테이블
+  # ──────────────────────────────────────────
+  AlgoDailyBotTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: AlgoDailyBotTable
+      BillingMode: PAY_PER_REQUEST
+      TableClass: STANDARD
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+        - AttributeName: GSI2PK
+          AttributeType: S
+        - AttributeName: GSI2SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI2
+          KeySchema:
+            - AttributeName: GSI2PK
+              KeyType: HASH
+            - AttributeName: GSI2SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # ──────────────────────────────────────────
+  # Lambda: 일일 문제 추천 (EventBridge 크론)
+  # ──────────────────────────────────────────
+  DailyRecommendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: algo-daily-bot-daily-recommend
+      CodeUri: src/handlers/
+      Handler: dailyRecommend.handler
+      Description: 매일 09:00 KST에 백준 문제를 추천하는 Lambda
+      Timeout: 60
+      MemorySize: 256
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlgoDailyBotTable
+        - SSMParameterReadPolicy:
+            ParameterName: algo-daily-bot/*
+      Events:
+        DailySchedule:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: cron(0 9 * * ? *)
+            ScheduleExpressionTimezone: Asia/Seoul
+            Description: 매일 09:00 KST 문제 추천
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: es2022
+        Sourcemap: true
+        EntryPoints:
+          - dailyRecommend.ts
+
+  # ──────────────────────────────────────────
+  # Lambda: Slack 이벤트 수신 (API Gateway)
+  # ──────────────────────────────────────────
+  SlackEventsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: algo-daily-bot-slack-events
+      CodeUri: src/handlers/
+      Handler: slackEvents.handler
+      Description: Slack 슬래시 커맨드를 수신하고 WorkerFunction을 비동기 호출
+      Timeout: 10
+      MemorySize: 256
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlgoDailyBotTable
+        - LambdaInvokePolicy:
+            FunctionName: !Ref WorkerFunction
+        - SSMParameterReadPolicy:
+            ParameterName: algo-daily-bot/*
+      Events:
+        SlackEndpoint:
+          Type: HttpApi
+          Properties:
+            Path: /slack/events
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: es2022
+        Sourcemap: true
+        EntryPoints:
+          - slackEvents.ts
+
+  # ──────────────────────────────────────────
+  # Lambda: AI 처리 워커 (비동기)
+  # ──────────────────────────────────────────
+  WorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: algo-daily-bot-worker
+      CodeUri: src/handlers/
+      Handler: worker.handler
+      Description: AI 코드 리뷰 및 블로그 초안 생성 (비동기)
+      Timeout: 120
+      MemorySize: 512
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlgoDailyBotTable
+        - SSMParameterReadPolicy:
+            ParameterName: algo-daily-bot/*
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+        DestinationConfig:
+          OnFailure:
+            Type: SQS
+            Destination: !GetAtt WorkerDLQ.Arn
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: es2022
+        Sourcemap: true
+        EntryPoints:
+          - worker.ts
+
+  # ──────────────────────────────────────────
+  # Lambda: 일일 solved.ac 동기화 (EventBridge 크론)
+  # ──────────────────────────────────────────
+  DailySyncFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: algo-daily-bot-daily-sync
+      CodeUri: src/handlers/
+      Handler: dailySync.handler
+      Description: 매일 00:00 KST에 solved.ac 풀이 목록을 동기화하는 Lambda
+      Timeout: 60
+      MemorySize: 256
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlgoDailyBotTable
+      Events:
+        DailySyncSchedule:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: cron(0 0 * * ? *)
+            ScheduleExpressionTimezone: Asia/Seoul
+            Description: 매일 00:00 KST solved.ac 동기화
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: es2022
+        Sourcemap: true
+        EntryPoints:
+          - dailySync.ts
+
+  # ──────────────────────────────────────────
+  # CloudWatch 알람: DLQ 메시지 발생 시
+  # ──────────────────────────────────────────
+  WorkerDLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: algo-daily-bot-worker-dlq-alarm
+      AlarmDescription: WorkerFunction 실패 메시지가 DLQ에 쌓였습니다
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt WorkerDLQ.QueueName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+Outputs:
+  SlackEventsApiUrl:
+    Description: Slack 슬래시 커맨드에 등록할 API Gateway URL
+    Value: !Sub "https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com/slack/events"
+
+  DynamoDBTableName:
+    Description: DynamoDB 테이블명
+    Value: !Ref AlgoDailyBotTable
+
+  WorkerDLQUrl:
+    Description: Worker Dead Letter Queue URL
+    Value: !Ref WorkerDLQ
