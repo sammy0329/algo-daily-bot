@@ -87,16 +87,17 @@ export async function searchProblems(params: {
 
 /**
  * 사용자가 푼 문제 목록을 페이지 단위로 조회한다.
- * sort=latest 옵션으로 최근 풀이 순으로 정렬된다.
+ * sort 미지정 시 API 기본 정렬(최신 풀이순)이 적용된다.
  */
 export async function getSolvedProblems(params: {
   handle: string;
   page?: number;
-  sort?: 'id' | 'level' | 'title' | 'solved' | 'average-try' | 'latest';
+  sort?: 'id' | 'level' | 'title' | 'solved' | 'average-try';
 }): Promise<SolvedacSearchResult> {
-  const { handle, page = 1, sort = 'id' } = params;
+  const { handle, page = 1, sort } = params;
   const query = encodeURIComponent(`@${handle}`);
-  const url = `${BASE_URL}/search/problem?query=${query}&page=${page}&sort=${sort}`;
+  const sortParam = sort ? `&sort=${sort}` : '';
+  const url = `${BASE_URL}/search/problem?query=${query}&page=${page}${sortParam}`;
 
   const data = (await fetchWithRetry(url)) as {
     count: number;
@@ -121,9 +122,9 @@ export async function getSolvedProblems(params: {
   };
 }
 
-/** 최근 풀이 첫 페이지만 조회한다 (일일 델타 동기화용). */
+/** 최근 풀이 첫 페이지만 조회한다 (일일 델타 동기화용). sort 미지정 → API 기본 최신순 */
 export async function getLatestSolvedPage(handle: string): Promise<SolvedProblem[]> {
-  const result = await getSolvedProblems({ handle, page: 1, sort: 'latest' });
+  const result = await getSolvedProblems({ handle, page: 1 });
   return result.items;
 }
 
@@ -160,7 +161,7 @@ export async function getAllSolvedProblems(handle: string): Promise<SolvedProble
   let page = 1;
 
   while (true) {
-    const result = await getSolvedProblems({ handle, page });
+    const result = await getSolvedProblems({ handle, page, sort: 'id' }); // 페이지네이션 안정성을 위해 sort=id 고정
     allProblems.push(...result.items);
 
     const totalPages = Math.ceil(result.count / 50);

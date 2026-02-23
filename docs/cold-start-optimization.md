@@ -176,7 +176,7 @@ if ((event as any).source === 'prewarm') return;
 | `WorkerFunction` (`/blog`) | 451ms | **378ms** | **-16%** |
 | `SlackEventsFunction` | 416ms | **414ms** | -0.5% |
 | `DailyRecommendFunction` | 399ms | **408ms** | +2%* |
-| `DailySyncFunction` | 331ms | **243ms** | **-27%** |
+| `DailySyncFunction` | 331ms | **226ms** | **-32%** |
 
 > *`DailyRecommendFunction` Init Duration은 측정 편차 수준. 예열 트리거 적용으로 실제 09:00 실행 시 Init Duration **0ms** 기대.
 > `DailySyncFunction`은 번들 크기 감소(-52%) + 메모리 축소(-50%)의 복합 효과로 가장 큰 감소폭.
@@ -200,17 +200,18 @@ if ((event as any).source === 'prewarm') return;
 | `DailyRecommendFunction` | 256MB | **256MB** | 165MB | 91MB |
 | `DailySyncFunction` | 256MB | **128MB** | 118MB | 10MB |
 
-### 실행 시간 트레이드오프 (DailySyncFunction)
+### 실행 시간 (DailySyncFunction)
 
-메모리를 256MB → 128MB로 낮추면 CPU도 비례해 감소하여 실행 시간이 늘어난다.
-단, Lambda 요금은 `메모리(GB) × 실행시간(초)` 기준이므로 **총 비용은 오히려 감소**한다.
+메모리를 256MB → 128MB로 낮췄으나, 실행 시간도 함께 감소했다.
+DailySyncFunction은 I/O 대기(solved.ac API, DynamoDB)가 지배적이라 CPU 감소 영향이 미미하다.
 
 | | Before | After |
 |--|--:|--:|
 | 메모리 | 256MB | 128MB |
-| 실행 시간 | 4,111ms | 5,413ms (+32%) |
-| **GB-초** | **1.028** | **0.677** |
-| **비용 변화** | | **-34%** |
+| Init Duration | 331ms | 226ms (-32%) |
+| 실행 시간 (웜) | 4,111ms | ~2,941ms (-28%) |
+| Max Memory Used | 138MB | 98~111MB |
+| **GB-초** | **1.028** | **~0.376 (-63%)** |
 
 ### 번들 크기
 
