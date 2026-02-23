@@ -282,18 +282,26 @@ sam local invoke DailyRecommendFunction -e events/schedule.json  # 로컬 테스
 
 > 상세 측정 결과 및 최적화 과정은 [cold-start-optimization.md](docs/cold-start-optimization.md)를 참고하세요.
 
-### Before (v1.1 기준)
+v1.2에서 4가지 최적화(esbuild Minify, 메모리 조정, 예열 트리거, CloudWatch 로그 보존)를 적용했습니다.
 
-| 함수 | 콜드 스타트 | 메모리 할당 / 실사용 | 번들 크기 |
-|------|----------:|-------------------:|--------:|
-| `WorkerFunction` | 581ms | 512MB / 200MB | 3.2MB |
-| `SlackEventsFunction` | 416ms | 256MB / 124MB | 2.5MB |
-| `DailyRecommendFunction` | 399ms | 256MB / 164MB | 2.2MB |
-| `DailySyncFunction` | 331ms | 256MB / 138MB | 1.1MB |
+**핵심 개선 요약:**
+- 번들 크기 전 함수 **~50% 감소** → 콜드 스타트 단축
+- `DailySyncFunction` 콜드 스타트 **331ms → 243ms (-27%)**
+- `WorkerFunction` 메모리 **512MB → 256MB** (실사용 대비 과할당 해소)
+- `DailyRecommendFunction` 예열 트리거로 매일 09:00 실행 시 **콜드 스타트 0ms** 기대
+- `SlackEventsFunction` · `DailySyncFunction` 메모리 **256MB → 128MB**, GB-초 기준 비용 **~34% 절감**
 
-### After (v1.2 예정)
+### Before / After 비교 (v1.1 → v1.2)
 
-최적화 진행 중 — 결과 업데이트 예정
+| 함수 | 콜드 스타트 Before | 콜드 스타트 After | 메모리 Before | 메모리 After | 번들 크기 Before | 번들 크기 After |
+|------|----------------:|----------------:|------------:|------------:|---------------:|---------------:|
+| `WorkerFunction` (`/review`) | 471ms | **418ms** ↓11% | 512MB | **256MB** | 3.2MB | **1.65MB** |
+| `WorkerFunction` (`/blog`) | 451ms | **378ms** ↓16% | 512MB | **256MB** | 3.2MB | **1.65MB** |
+| `SlackEventsFunction` | 416ms | **414ms** | 256MB | **128MB** | 2.5MB | **1.25MB** |
+| `DailyRecommendFunction` | 399ms | 408ms* | 256MB | **256MB** | 2.2MB | **1.09MB** |
+| `DailySyncFunction` | 331ms | **243ms** ↓27% | 256MB | **128MB** | 1.1MB | **0.53MB** |
+
+*예열 트리거 적용으로 실제 09:00 실행 시 Init Duration **0ms** 기대
 
 ---
 

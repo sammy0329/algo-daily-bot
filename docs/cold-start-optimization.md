@@ -11,7 +11,7 @@
 | **측정 일시** | 2026-02-23 |
 | **런타임** | Node.js 20.x (ARM64) |
 | **리전** | ap-northeast-2 (서울) |
-| **측정 방법** | `aws lambda invoke --log-type Tail` → CloudWatch REPORT 로그 파싱 |
+| **측정 방법** | 실제 Slack 커맨드 실행 → CloudWatch REPORT 로그 파싱 |
 | **빌드 도구** | AWS SAM + esbuild |
 
 > CloudWatch REPORT 로그의 `Init Duration` 필드가 있는 호출 = 콜드 스타트, 없는 호출 = 웜 스타트
@@ -20,26 +20,27 @@
 
 ## Before — 베이스라인 (v1.1)
 
-### 콜드 스타트 측정값
+### 콜드 스타트 Init Duration
 
-| 함수 | Init Duration | 실행 시간 | 총 체감 시간 | 빌링 시간 |
-|------|-------------:|--------:|------------:|---------:|
-| `WorkerFunction` (`/review`) | **471ms** | 23,202ms | **23,673ms** | 23,674ms |
-| `WorkerFunction` (`/blog`) | **451ms** | 10,079ms | **10,530ms** | 10,530ms |
-| `SlackEventsFunction` | **416ms** | 511ms | **927ms** | 928ms |
-| `DailyRecommendFunction` | **399ms** | 8,454ms | **8,853ms** | 8,853ms |
-| `DailySyncFunction` | **331ms** | 4,111ms | **4,442ms** | 4,442ms |
+| 함수 | Init Duration | 측정 방법 |
+|------|-------------:|---------|
+| `WorkerFunction` (`/review`) | **471ms** | 실제 Slack 커맨드 |
+| `WorkerFunction` (`/blog`) | **451ms** | 실제 Slack 커맨드 |
+| `SlackEventsFunction` | **416ms** | `aws lambda invoke` (직접 호출) |
+| `DailyRecommendFunction` | **399ms** | `aws lambda invoke` (직접 호출) |
+| `DailySyncFunction` | **331ms** | `aws lambda invoke` (직접 호출) |
 
-> WorkerFunction Init Duration은 `/review`·`/blog` 모두 450~471ms 수준으로 일관됨. 실행 시간은 AI 프롬프트 길이에 따라 커맨드별로 차이 발생.
+> WorkerFunction의 실행 시간(Duration)은 AI 응답 길이에 따라 매번 달라지므로 비교 지표에서 제외.
+> SlackEventsFunction의 Duration은 Before(직접 호출)와 After(실제 Slack 커맨드) 측정 방식이 달라 비교 불가 — Init Duration만 유효.
 
-### 웜 스타트 측정값
+### 웜 스타트
 
-| 함수 | 실행 시간 | 콜드 대비 감소 |
-|------|--------:|-------------:|
-| `SlackEventsFunction` (2차 호출) | **2ms** | -99.6% |
+| 함수 | Init Duration | 웜 스타트 실행 시간 |
+|------|-------------:|------------------:|
+| `SlackEventsFunction` | 416ms (콜드) | **2ms** (웜) |
 
-> SlackEventsFunction의 콜드(927ms) vs 웜(2ms) 차이가 **464배**로 가장 극단적이다.
-> 사용자가 `/review`를 뜸하게 입력하면 매번 콜드 스타트가 발생한다.
+> 콜드(416ms+) vs 웜(2ms) 차이가 **200배 이상**. 사용자가 `/review`·`/blog`를 뜸하게 입력하면 매번 콜드 스타트가 발생.
+> 웜 스타트 2ms는 `aws lambda invoke` 빈 페이로드 측정값. 실제 Slack 커맨드는 서명 검증·DynamoDB 조회 포함으로 더 길다.
 
 ### 메모리 할당 vs 실사용
 
@@ -158,34 +159,58 @@ if ((event as any).source === 'prewarm') return;
 | `SlackEventsFunction` | 256MB | **128MB** | 실사용 124MB. 서명 검증·DynamoDB 조회만 수행 |
 | `DailySyncFunction` | 256MB | **128MB** | 실사용 138MB. API 1회 호출 + DynamoDB write |
 | `DailyRecommendFunction` | 256MB | **256MB** | 실사용 164MB. 유지 (외부 API 다수 호출) |
-| `WorkerFunction` | 512MB | **256MB** | 실사용 200MB. AI 응답 처리 감안 여유 확보 |
+| `WorkerFunction` | 512MB | **256MB** | 실사용 179MB. AI 응답 처리 감안 여유 확보 |
 
-> ⚠️ Lambda는 메모리와 CPU가 비례 관계. 너무 낮추면 실행 시간이 길어져 빌링이 늘어날 수 있음.
-> 조정 후 실행 시간 재측정 필수.
+> ⚠️ Lambda는 메모리와 CPU가 비례 관계. 메모리를 낮추면 실행 시간이 늘어날 수 있음.
+> 단, 요금은 `메모리(GB) × 실행시간(초)` 기준이므로 실행 시간이 늘어도 총 비용은 줄어드는 경우가 많음.
 
 ---
 
 ## After — 개선 결과 (v1.2)
 
-> 최적화 적용 후 측정값으로 업데이트 예정
-
-### 콜드 스타트 (Init Duration)
+### 콜드 스타트 Init Duration
 
 | 함수 | Before | After | 감소 |
 |------|-------:|------:|-----:|
-| `WorkerFunction` | ~461ms | - | - |
-| `SlackEventsFunction` | 416ms | - | - |
-| `DailyRecommendFunction` | 399ms | - | - |
-| `DailySyncFunction` | 331ms | - | - |
+| `WorkerFunction` (`/review`) | 471ms | **418ms** | **-11%** |
+| `WorkerFunction` (`/blog`) | 451ms | **378ms** | **-16%** |
+| `SlackEventsFunction` | 416ms | **414ms** | -0.5% |
+| `DailyRecommendFunction` | 399ms | **408ms** | +2%* |
+| `DailySyncFunction` | 331ms | **243ms** | **-27%** |
 
-### 메모리 할당 → 변경
+> *`DailyRecommendFunction` Init Duration은 측정 편차 수준. 예열 트리거 적용으로 실제 09:00 실행 시 Init Duration **0ms** 기대.
+> `DailySyncFunction`은 번들 크기 감소(-52%) + 메모리 축소(-50%)의 복합 효과로 가장 큰 감소폭.
 
-| 함수 | Before | After |
-|------|-------:|------:|
-| `WorkerFunction` | 512MB | 256MB |
-| `SlackEventsFunction` | 256MB | 128MB |
-| `DailyRecommendFunction` | 256MB | 256MB |
-| `DailySyncFunction` | 256MB | 128MB |
+### 웜 스타트
+
+| 함수 | 콜드 스타트 | 웜 스타트 | 차이 |
+|------|----------:|--------:|-----:|
+| `WorkerFunction` (`/blog`) | 378ms + 16,912ms | 12,216ms | - |
+| `SlackEventsFunction` | 414ms + 2,727ms | 1,634ms | - |
+
+> WorkerFunction 웜 스타트는 AI 응답 길이 편차로 인해 절대값 비교보다 Init Duration 제거 효과에 주목.
+
+### 메모리 실사용
+
+| 함수 | 할당 Before | 할당 After | 실사용 After | 여유 |
+|------|----------:|----------:|------------:|-----:|
+| `WorkerFunction` (`/review`) | 512MB | **256MB** | 173MB | 83MB |
+| `WorkerFunction` (`/blog`) | 512MB | **256MB** | 157MB | 99MB |
+| `SlackEventsFunction` | 256MB | **128MB** | 111MB | 17MB |
+| `DailyRecommendFunction` | 256MB | **256MB** | 165MB | 91MB |
+| `DailySyncFunction` | 256MB | **128MB** | 118MB | 10MB |
+
+### 실행 시간 트레이드오프 (DailySyncFunction)
+
+메모리를 256MB → 128MB로 낮추면 CPU도 비례해 감소하여 실행 시간이 늘어난다.
+단, Lambda 요금은 `메모리(GB) × 실행시간(초)` 기준이므로 **총 비용은 오히려 감소**한다.
+
+| | Before | After |
+|--|--:|--:|
+| 메모리 | 256MB | 128MB |
+| 실행 시간 | 4,111ms | 5,413ms (+32%) |
+| **GB-초** | **1.028** | **0.677** |
+| **비용 변화** | | **-34%** |
 
 ### 번들 크기
 
@@ -200,7 +225,9 @@ if ((event as any).source === 'prewarm') return;
 
 | 항목 | Before | After |
 |------|-------:|------:|
-| `sam build` | 1.46초 | - |
+| `sam build` | 1.46초 | **1.97초** |
+
+> Minify 활성화로 빌드 시간이 소폭 증가(+0.51초)하지만 배포 시 1회성. 번들 크기 감소 효과가 훨씬 큼.
 
 ---
 
