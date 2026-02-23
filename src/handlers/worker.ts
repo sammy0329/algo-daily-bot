@@ -1,4 +1,4 @@
-import { getAIClient, ReviewContext } from '../shared/aiClient';
+import { getAIClient, ReviewContext, BlogContext } from '../shared/aiClient';
 import { postMessage, postErrorMessage } from '../shared/slack';
 import { getProblemById } from '../shared/solvedac';
 import { ErrorCode } from '../shared/constants';
@@ -54,12 +54,8 @@ function isReviewPayload(
   );
 }
 
-function isBlogPayload(p: unknown): p is { topic: string; code?: string } {
-  return (
-    typeof p === 'object' &&
-    p !== null &&
-    typeof (p as Record<string, unknown>).topic === 'string'
-  );
+function isBlogPayload(p: unknown): p is { topic?: string; code?: string; problemId?: number } {
+  return typeof p === 'object' && p !== null;
 }
 
 // ──────────────────────────────────────────
@@ -94,12 +90,20 @@ async function handleReview(event: WorkerPayload): Promise<void> {
 async function handleBlog(event: WorkerPayload): Promise<void> {
   const { channel, threadTs } = event;
   if (!isBlogPayload(event.payload)) {
-    throw new Error('잘못된 blog 페이로드: topic 필드가 없습니다.');
+    throw new Error('잘못된 blog 페이로드');
   }
-  const { topic, code } = event.payload;
+  const { topic, code, problemId } = event.payload;
+
+  if (!topic && !problemId) {
+    throw new Error('blog 페이로드에 topic 또는 problemId가 필요합니다.');
+  }
+
+  // 문제 번호가 있으면 solved.ac에서 문제 정보 조회
+  const problem = problemId ? (await getProblemById(problemId) ?? undefined) : undefined;
+  const context: BlogContext = { problem: problem ?? undefined };
 
   const ai = await getAIClient();
-  const draft = await ai.generateBlogDraft(topic, code);
+  const draft = await ai.generateBlogDraft(topic, code, context);
 
   // 블로그 초안은 삼중 백틱 마크다운 코드 블록으로 게시
   const message = `\`\`\`markdown\n${draft}\n\`\`\``;

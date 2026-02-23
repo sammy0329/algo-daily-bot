@@ -9,9 +9,29 @@ export interface ReviewContext {
   status?: 'solved' | 'failed';
 }
 
+export interface BlogContext {
+  problem?: ProblemContext;
+}
+
 export interface AIClient {
   generateCodeReview(code: string, language?: string, context?: ReviewContext): Promise<string>;
-  generateBlogDraft(topic: string, code?: string): Promise<string>;
+  generateBlogDraft(topic?: string, code?: string, context?: BlogContext): Promise<string>;
+}
+
+/** AI에 전달할 블로그 초안 user 메시지를 구성한다. */
+export function buildBlogUserMessage(topic?: string, code?: string, context?: BlogContext): string {
+  const parts: string[] = [];
+
+  if (context?.problem) {
+    const p = context.problem;
+    parts.push(`문제: [${p.tier}] ${p.title} (${p.url})`);
+    if (p.tags.length > 0) parts.push(`알고리즘 태그: ${p.tags.join(', ')}`);
+  }
+
+  if (topic) parts.push(`추가 설명: ${topic}`);
+  if (code) parts.push(`제출 코드:\n\`\`\`\n${code}\n\`\`\``);
+
+  return parts.join('\n');
 }
 
 /** AI에 전달할 리뷰 user 메시지를 구성한다. */
@@ -86,15 +106,14 @@ function createGPTClient(apiKey: string, model: string): AIClient {
       });
       return response.choices[0]?.message?.content ?? '리뷰 결과를 가져올 수 없습니다.';
     },
-    async generateBlogDraft(topic, code) {
+    async generateBlogDraft(topic, code, context) {
       const { default: OpenAI } = await import('openai');
       const client = new OpenAI({ apiKey });
-      const codeSection = code ? `\n\n제출 코드:\n\`\`\`\n${code}\n\`\`\`` : '';
       const response = await client.chat.completions.create({
         model,
         messages: [
           { role: 'system', content: BLOG_DRAFT_SYSTEM_PROMPT },
-          { role: 'user', content: `주제: ${topic}${codeSection}` },
+          { role: 'user', content: buildBlogUserMessage(topic, code, context) },
         ],
         max_tokens: 4096,
       });
@@ -122,16 +141,15 @@ function createClaudeClient(apiKey: string, model: string): AIClient {
       const block = response.content[0];
       return block?.type === 'text' ? block.text : '리뷰 결과를 가져올 수 없습니다.';
     },
-    async generateBlogDraft(topic, code) {
+    async generateBlogDraft(topic, code, context) {
       const Anthropic = (await import('@anthropic-ai/sdk')).default;
       const client = new Anthropic({ apiKey });
-      const codeSection = code ? `\n\n제출 코드:\n\`\`\`\n${code}\n\`\`\`` : '';
       const response = await client.messages.create({
         model,
         max_tokens: 4096,
         system: BLOG_DRAFT_SYSTEM_PROMPT,
         messages: [
-          { role: 'user', content: `주제: ${topic}${codeSection}` },
+          { role: 'user', content: buildBlogUserMessage(topic, code, context) },
         ],
       });
       const block = response.content[0];
@@ -152,12 +170,11 @@ function createGeminiClient(apiKey: string, model: string): AIClient {
       const result = await genModel.generateContent(buildReviewUserMessage(code, language, context));
       return result.response.text();
     },
-    async generateBlogDraft(topic, code) {
+    async generateBlogDraft(topic, code, context) {
       const { GoogleGenerativeAI } = await import('@google/generative-ai');
       const genAI = new GoogleGenerativeAI(apiKey);
       const genModel = genAI.getGenerativeModel({ model, systemInstruction: BLOG_DRAFT_SYSTEM_PROMPT });
-      const codeSection = code ? `\n\n제출 코드:\n\`\`\`\n${code}\n\`\`\`` : '';
-      const result = await genModel.generateContent(`주제: ${topic}${codeSection}`);
+      const result = await genModel.generateContent(buildBlogUserMessage(topic, code, context));
       return result.response.text();
     },
   };

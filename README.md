@@ -202,7 +202,7 @@ AI 제공자 변경 시 `setup-ai.ts`를 다시 실행하면 됩니다. **Lambda
 BOJ 문제 번호가 필수입니다. `solved` / `failed`로 정답 여부를 알려주면 더 정확한 피드백을 받습니다.
 
 ````
-/review 1753 solved ```python
+/review 1753 solved ```
 def dijkstra(n, graph):
     import heapq
     dist = [float('inf')] * (n + 1)
@@ -211,7 +211,7 @@ def dijkstra(n, graph):
 ````
 
 ````
-/review 1753 failed ```python
+/review 1753 failed ```
 def dijkstra(n, graph):
     ...
 ```
@@ -219,21 +219,25 @@ def dijkstra(n, graph):
 
 - 문제 번호: 필수 (solved.ac에서 제목·난이도·태그 자동 조회)
 - `solved|failed`: 선택 (생략 시 정답 여부 없이 코드 리뷰)
+- 언어 태그 불필요 — ` ``` ` 그대로 사용
 - 최대 3,000자 / 일일 10회 제한
 
 ### `/blog` — 블로그 초안 생성
 
+문제 번호와 코드를 넣으면 solved.ac에서 문제 정보를 자동 조회해 프롬프트에 포함합니다:
+
+````
+/blog 1753 ```
+def dijkstra(n, graph):
+    ...
+```
+````
+
+자유 텍스트로도 사용 가능합니다:
+
 ```
 /blog 백준 1932번 정수 삼각형 DP 풀이
 ```
-
-코드를 함께 포함할 수도 있습니다:
-
-````
-/blog 피보나치 DP 풀이 ```python
-def fib(n): ...
-```
-````
 
 - 일일 5회 제한
 - 결과는 스레드 답글에 마크다운 형식으로 게시
@@ -251,6 +255,7 @@ def fib(n): ...
 | [architecture/overview.md](docs/architecture/overview.md) | 시스템 아키텍처 개요 |
 | [architecture/data-flow.md](docs/architecture/data-flow.md) | 데이터 흐름 및 DynamoDB 테이블 설계 |
 | [troubleshooting.md](docs/troubleshooting.md) | 배포 오류 해결 (SAM Transform 권한 등) |
+| [cold-start-optimization.md](docs/cold-start-optimization.md) | Lambda 콜드 스타트 측정 및 최적화 기록 |
 | [adr/](docs/adr/) | 아키텍처 결정 기록 (ADR) |
 
 ---
@@ -270,6 +275,33 @@ sam local invoke DailyRecommendFunction -e events/schedule.json  # 로컬 테스
 
 - **WorkerDLQ 알람**: DLQ에 메시지가 쌓이면 CloudWatch 알람 발생
 - **로그**: CloudWatch Logs (`/aws/lambda/algo-daily-bot-*`)
+
+---
+
+## 성능
+
+> 상세 측정 결과 및 최적화 과정은 [cold-start-optimization.md](docs/cold-start-optimization.md)를 참고하세요.
+
+v1.2에서 4가지 최적화(esbuild Minify, 메모리 조정, 예열 트리거, CloudWatch 로그 보존)를 적용했습니다.
+
+**핵심 개선 요약:**
+- 번들 크기 전 함수 **~50% 감소** → 콜드 스타트 단축
+- `DailySyncFunction` 콜드 스타트 **331ms → 243ms (-27%)**
+- `WorkerFunction` 메모리 **512MB → 256MB** (실사용 대비 과할당 해소)
+- `DailyRecommendFunction` 예열 트리거로 매일 09:00 실행 시 **콜드 스타트 0ms** 기대
+- `SlackEventsFunction` · `DailySyncFunction` 메모리 **256MB → 128MB**, GB-초 기준 비용 **~34% 절감**
+
+### Before / After 비교 (v1.1 → v1.2)
+
+| 함수 | 콜드 스타트 Before | 콜드 스타트 After | 메모리 Before | 메모리 After | 번들 크기 Before | 번들 크기 After |
+|------|----------------:|----------------:|------------:|------------:|---------------:|---------------:|
+| `WorkerFunction` (`/review`) | 471ms | **418ms** ↓11% | 512MB | **256MB** | 3.2MB | **1.65MB** |
+| `WorkerFunction` (`/blog`) | 451ms | **378ms** ↓16% | 512MB | **256MB** | 3.2MB | **1.65MB** |
+| `SlackEventsFunction` | 416ms | **414ms** | 256MB | **128MB** | 2.5MB | **1.25MB** |
+| `DailyRecommendFunction` | 399ms | 408ms* | 256MB | **256MB** | 2.2MB | **1.09MB** |
+| `DailySyncFunction` | 331ms | **243ms** ↓27% | 256MB | **128MB** | 1.1MB | **0.53MB** |
+
+*예열 트리거 적용으로 실제 09:00 실행 시 Init Duration **0ms** 기대
 
 ---
 

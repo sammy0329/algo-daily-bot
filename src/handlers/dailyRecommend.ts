@@ -21,6 +21,8 @@ function requireEnv(name: string): string {
 }
 
 export const handler = async (_event: ScheduledEvent): Promise<void> => {
+  if ((_event as unknown as { source?: string }).source === 'prewarm') return;
+
   try {
     await run();
   } catch (err) {
