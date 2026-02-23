@@ -574,7 +574,7 @@ TABLE_NAME=AlgoDailyBotTable \
 | Command | `/review` |
 | Request URL | `https://xxxxxxxxxx.execute-api.ap-northeast-2.amazonaws.com/slack/events` |
 | Short Description | `AI 코드 리뷰 요청` |
-| Usage Hint | `` ```[언어] 코드 ``` `` |
+| Usage Hint | `` [문제번호] [solved\|failed] ```코드``` `` |
 
 4. **"Save"** 클릭
 
@@ -587,7 +587,7 @@ TABLE_NAME=AlgoDailyBotTable \
 | Command | `/blog` |
 | Request URL | `https://xxxxxxxxxx.execute-api.ap-northeast-2.amazonaws.com/slack/events` |
 | Short Description | `AI 블로그 초안 생성` |
-| Usage Hint | `백준 1234번 피보나치 풀이` |
+| Usage Hint | `` [문제번호] ```코드``` `` |
 
 4. **"Save"** 클릭
 
@@ -614,8 +614,8 @@ TABLE_NAME=AlgoDailyBotTable \
 
 ### 9-2. 코드 리뷰 테스트
 
-```
-/review ```python
+````
+/review 1000 ```
 def solution(n):
     if n <= 1:
         return n
@@ -623,7 +623,7 @@ def solution(n):
 
 print(solution(10))
 ```
-```
+````
 
 → 잠시 후 같은 스레드에 AI 리뷰가 달리면 성공!
 
@@ -656,7 +656,7 @@ Slack 채널에 문제 추천 메시지가 오면 성공!
 **문제 번호 + 정답 여부 포함 (권장):**
 
 ````
-/review 1753 solved ```python
+/review 1753 solved ```
 def dijkstra(n, graph):
     import heapq
     dist = [float('inf')] * (n + 1)
@@ -666,7 +666,7 @@ def dijkstra(n, graph):
 ````
 
 ````
-/review 1753 failed ```python
+/review 1753 failed ```
 def dijkstra(n, graph):
     ...
 ```
@@ -675,7 +675,7 @@ def dijkstra(n, graph):
 **정답 여부 생략 (문제 번호는 필수):**
 
 ````
-/review 1753 ```python
+/review 1753 ```
 def dijkstra(n, graph):
     ...
 ```
@@ -690,9 +690,9 @@ def dijkstra(n, graph):
 | 코드블록 | **필수** | 3중 백틱으로 감싼 코드 |
 
 **제약 사항**:
-- 코드는 반드시 ` ``` ` 3중 백틱으로 감싸야 합니다
+- 코드는 반드시 ` ``` ` 3중 백틱으로 감싸야 합니다 (Slack에서 ` ``` ` 입력 시 자동 생성)
+- 언어 태그 불필요 — ` ``` ` 그대로 사용
 - 최대 3,000자
-- 언어 태그 선택 사항 (` ```python`, ` ```java`, ` ```cpp` 등)
 - 하루 최대 **10회** (기본값)
 
 **리뷰 내용**:
@@ -706,17 +706,28 @@ def dijkstra(n, graph):
 
 ### /blog — AI 블로그 초안 생성
 
-주제를 입력하면 블로그 초안을 마크다운으로 생성합니다.
+문제 번호와 코드를 넣으면 solved.ac에서 제목·난이도·태그를 자동 조회해 프롬프트에 포함합니다.
 
-**주제만 입력:**
+**문제 번호 + 코드 (권장):**
+
+````
+/blog 1753 ```
+def dijkstra(n, graph):
+    import heapq
+    dist = [float('inf')] * (n + 1)
+    ...
+```
+````
+
+**자유 텍스트만 입력:**
 ```
 /blog 백준 1753번 최단 경로 다익스트라 풀이
 ```
 
-**코드와 함께 입력:**
+**텍스트 + 코드 함께:**
 
 ````
-/blog 유니온-파인드 알고리즘 분석 ```python
+/blog 유니온-파인드 알고리즘 분석 ```
 def find(x):
     if parent[x] != x:
         parent[x] = find(parent[x])
@@ -736,6 +747,7 @@ def find(x):
 ```
 
 **제약 사항**:
+- 문제 번호 또는 텍스트 중 하나는 필수
 - 하루 최대 **5회** (기본값)
 - 응답이 길면 자동으로 여러 메시지로 분할됩니다
 

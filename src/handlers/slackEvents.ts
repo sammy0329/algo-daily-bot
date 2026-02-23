@@ -10,12 +10,15 @@ const lambdaClient = new LambdaClient({});
 const REVIEW_DAILY_LIMIT = parseInt(process.env.REVIEW_DAILY_LIMIT ?? '10', 10);
 const BLOG_DAILY_LIMIT = parseInt(process.env.BLOG_DAILY_LIMIT ?? '5', 10);
 
-// 코드 블록 정규식: ```[언어태그]\n코드\n```
+// 코드 블록 정규식: ```[언어태그(선택)]\n코드\n```
 const CODE_BLOCK_REGEX = /```(\w*)\n?([\s\S]*?)```/;
 const MAX_CODE_LENGTH = 3000;
 
 // /review 커맨드 정규식: [문제번호(1~5자리)] [solved|failed(선택)] [코드블록]
 const REVIEW_COMMAND_REGEX = /^(\d{1,5})(?:\s+(solved|failed))?\s+([\s\S]*)$/;
+
+// /blog 커맨드: 문제번호로 시작하는지 확인
+const BLOG_PROBLEM_REGEX = /^(\d{1,5})(?:\s|$)/;
 
 export const handler = async (
   event: APIGatewayProxyEventV2,
@@ -121,7 +124,7 @@ export function parseReviewCommand(
     return {
       ok: false,
       message:
-        '사용법: `/review [문제번호] [solved|failed] \\`\\`\\`코드\\`\\`\\``\n예시: `/review 1753 solved \\`\\`\\`python\\ndef solution(): ...\\n\\`\\`\\``',
+        '사용법: `/review [문제번호] [solved|failed] \\`\\`\\`코드\\`\\`\\``\n예시: `/review 1753 solved \\`\\`\\`\\ndef solution(): ...\\n\\`\\`\\``',
     };
   }
 
@@ -155,17 +158,13 @@ async function handleBlog(params: {
     return { statusCode: 200, body: '' };
   }
 
-  // 3. 주제 검증
-  const topic = text.trim();
-  if (!topic) {
+  // 3. 커맨드 파싱 (문제번호 선택, 코드블록 선택, 텍스트 선택)
+  const { problemId, code, topic } = parseBlogCommand(text);
+  if (!problemId && !topic) {
     return ephemeralResponse(
-      '블로그 주제를 입력해주세요.\n예시: `/blog 백준 1234번 피보나치`',
+      '문제 번호 또는 블로그 주제를 입력해주세요.\n예시:\n• `/blog 1753 \\`\\`\\`코드\\`\\`\\``\n• `/blog 백준 1753번 다익스트라 풀이`',
     );
   }
-
-  // 코드 블록이 있으면 함께 추출 (선택사항)
-  const match = CODE_BLOCK_REGEX.exec(text);
-  const code = match ? match[2]?.trim() : undefined;
 
   // 4. 요청 제한 확인
   const count = await incrementRateLimit(userId, 'blog');
@@ -187,7 +186,7 @@ async function handleBlog(params: {
     channel: channelId,
     threadTs,
     userId,
-    payload: { topic, code },
+    payload: { topic, code, problemId },
   });
 
   // 7. HTTP 200 반환
@@ -206,7 +205,7 @@ export function validateCodeBlock(
     return {
       ok: false,
       message:
-        '코드 블록을 찾을 수 없습니다. 코드를 삼중 백틱으로 감싸서 입력해주세요.\n예시:\n`/review \\`\\`\\`python\\ndef solution(): ...\\n\\`\\`\\``',
+        '코드 블록을 찾을 수 없습니다. 코드를 삼중 백틱으로 감싸서 입력해주세요.\n예시:\n`/review 1753 \\`\\`\\`\\ndef solution(): ...\\n\\`\\`\\``',
     };
   }
 
@@ -225,6 +224,36 @@ export function validateCodeBlock(
   }
 
   return { ok: true, code, language };
+}
+
+// ──────────────────────────────────────────
+// /blog 커맨드 파싱
+// ──────────────────────────────────────────
+export function parseBlogCommand(text: string): {
+  problemId?: number;
+  code?: string;
+  topic: string;
+} {
+  const trimmed = text.trim();
+
+  let rest = trimmed;
+  let problemId: number | undefined;
+
+  // 문제 번호로 시작하면 추출
+  const numMatch = BLOG_PROBLEM_REGEX.exec(trimmed);
+  if (numMatch) {
+    problemId = parseInt(numMatch[1], 10);
+    rest = trimmed.slice(numMatch[0].length).trim();
+  }
+
+  // 코드 블록 추출
+  const codeMatch = CODE_BLOCK_REGEX.exec(rest);
+  const code = codeMatch ? codeMatch[2]?.trim() : undefined;
+
+  // 코드 블록 제외한 나머지가 topic
+  const topic = codeMatch ? rest.replace(codeMatch[0], '').trim() : rest;
+
+  return { problemId, code, topic };
 }
 
 // ──────────────────────────────────────────

@@ -12,7 +12,7 @@ sequenceDiagram
     participant WF as WorkerFunction
     participant AI as AI API
 
-    User->>Slack: /review [python 코드 블록]
+    User->>Slack: /review [문제번호] [solved|failed] [코드 블록]
     Slack->>APIGW: HTTPS POST (x-slack-signature 포함)
     APIGW->>SEF: 이벤트 전달
 
@@ -46,18 +46,21 @@ sequenceDiagram
     participant SEF as SlackEventsFunction
     participant DDB as DynamoDB
     participant WF as WorkerFunction
+    participant SA as solved.ac API
     participant AI as AI API
 
-    User->>Slack: /blog 백준 1234번 피보나치
+    User->>Slack: /blog [문제번호] [코드 블록] 또는 텍스트
     Slack->>SEF: HTTPS POST
-    SEF->>SEF: 서명 검증, 멱등성, 주제 검증, 요청 제한
+    SEF->>SEF: 서명 검증, 멱등성, 커맨드 파싱, 요청 제한
     SEF->>Slack: postMessage("블로그 초안 생성 중...")
     Slack-->>SEF: ts
-    SEF->>WF: Lambda.invoke(Event, topic, code?)
+    SEF->>WF: Lambda.invoke(Event, problemId?, topic, code?)
     SEF-->>Slack: HTTP 200
 
     Note over WF: 비동기 실행
-    WF->>AI: generateBlogDraft(topic, code?)
+    WF->>SA: getProblemById(problemId) [문제번호 있을 시]
+    SA-->>WF: 제목·난이도·태그
+    WF->>AI: generateBlogDraft(topic?, code?, problem?)
     AI-->>WF: 블로그 초안 (마크다운, ~3500자)
     WF->>Slack: postMessage(thread_ts, 마크다운 블로그 초안)
     Note over WF,Slack: 3900자 초과 시 분할 게시
