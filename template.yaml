@@ -112,10 +112,17 @@ Resources:
             ScheduleExpression: cron(0 9 * * ? *)
             ScheduleExpressionTimezone: Asia/Seoul
             Description: 매일 09:00 KST 문제 추천
+        PreWarmSchedule:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: cron(59 8 * * ? *)
+            ScheduleExpressionTimezone: Asia/Seoul
+            Description: 매일 08:59 KST 예열 (콜드 스타트 방지)
+            Input: '{"source":"prewarm"}'
     Metadata:
       BuildMethod: esbuild
       BuildProperties:
-        Minify: false
+        Minify: true
         Target: es2022
         Sourcemap: true
         EntryPoints:
@@ -132,7 +139,7 @@ Resources:
       Handler: slackEvents.handler
       Description: Slack 슬래시 커맨드를 수신하고 WorkerFunction을 비동기 호출
       Timeout: 10
-      MemorySize: 256
+      MemorySize: 128
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref AlgoDailyBotTable
@@ -149,7 +156,7 @@ Resources:
     Metadata:
       BuildMethod: esbuild
       BuildProperties:
-        Minify: false
+        Minify: true
         Target: es2022
         Sourcemap: true
         EntryPoints:
@@ -166,7 +173,7 @@ Resources:
       Handler: worker.handler
       Description: AI 코드 리뷰 및 블로그 초안 생성 (비동기)
       Timeout: 120
-      MemorySize: 512
+      MemorySize: 256
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref AlgoDailyBotTable
@@ -181,7 +188,7 @@ Resources:
     Metadata:
       BuildMethod: esbuild
       BuildProperties:
-        Minify: false
+        Minify: true
         Target: es2022
         Sourcemap: true
         EntryPoints:
@@ -198,7 +205,7 @@ Resources:
       Handler: dailySync.handler
       Description: 매일 00:00 KST에 solved.ac 풀이 목록을 동기화하는 Lambda
       Timeout: 60
-      MemorySize: 256
+      MemorySize: 128
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref AlgoDailyBotTable
@@ -212,11 +219,38 @@ Resources:
     Metadata:
       BuildMethod: esbuild
       BuildProperties:
-        Minify: false
+        Minify: true
         Target: es2022
         Sourcemap: true
         EntryPoints:
           - dailySync.ts
+
+  # ──────────────────────────────────────────
+  # CloudWatch Log Groups (보존 기간 설정)
+  # ──────────────────────────────────────────
+  DailyRecommendLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/algo-daily-bot-daily-recommend
+      RetentionInDays: 7
+
+  SlackEventsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/algo-daily-bot-slack-events
+      RetentionInDays: 7
+
+  WorkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/algo-daily-bot-worker
+      RetentionInDays: 14
+
+  DailySyncLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/algo-daily-bot-daily-sync
+      RetentionInDays: 7
 
   # ──────────────────────────────────────────
   # CloudWatch 알람: DLQ 메시지 발생 시
