@@ -65,14 +65,14 @@ flowchart LR
 **사용법**:
 
 ````
-/review 1753 solved ```python
+/review 1753 solved ```
 def dijkstra(n, graph):
     ...
 ```
 ````
 
 ````
-/review 1753 failed ```python
+/review 1753 failed ```
 def dijkstra(n, graph):
     ...
 ```
@@ -87,9 +87,9 @@ def dijkstra(n, graph):
 | 코드블록 | 필수 | 3중 백틱으로 감싼 코드 |
 
 **입력 조건**:
-- 코드는 반드시 3중 백틱(` ``` `)으로 감싸야 합니다
+- 코드는 반드시 3중 백틱(` ``` `)으로 감싸야 합니다 (Slack에서 자동 생성)
+- 언어 태그 불필요 — ` ``` ` 그대로 사용
 - 최대 3,000자 이내
-- 언어 태그 선택 사항 (` ```python`, ` ```java` 등)
 
 **AI 리뷰 항목**:
 1. 문제 조건 기반 정확성 검증 (엣지 케이스 포함)
@@ -107,21 +107,27 @@ def dijkstra(n, graph):
 
 ```mermaid
 flowchart LR
-    User["👤 사용자"] -->|"/blog 주제 또는 코드 포함"| Bot
+    User["👤 사용자"] -->|"/blog [문제번호] [코드블록] 또는 텍스트"| Bot
+    Bot -->|"solved.ac에서 문제 정보 조회 (번호 있을 시)"| SOLVD["solved.ac API"]
     Bot -->|"✍️ 블로그 초안 생성 중..."| Thread["💬 스레드"]
     Bot -->|"마크다운 블로그 초안"| Thread
 ```
 
 **사용법**:
 
+문제 번호 + 코드 (권장):
+
+````
+/blog 1753 ```
+def dijkstra(n, graph):
+    ...
+```
+````
+
+자유 텍스트:
+
 ```
 /blog 백준 1753번 최단 경로 풀이
-```
-
-또는 코드와 함께:
-
-```
-/blog 다익스트라 알고리즘 분석 [java 코드블록]
 ```
 
 **생성 형식**:
